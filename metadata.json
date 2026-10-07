@@ -1,0 +1,6 @@
+{
+  "name": "Échele Camello",
+  "description": "Plataforma de intermediación laboral y servicios técnicos para conectar trabajadores independientes con hogares y empresas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
