@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserRole } from '../types';
-import { Smartphone, Monitor, ShieldCheck, Briefcase, User, Sparkles } from 'lucide-react';
+import { Smartphone, Monitor, ShieldCheck, Briefcase, User, Sparkles, Database } from 'lucide-react';
 
 interface NavbarProps {
   currentRole: UserRole;
@@ -10,6 +10,8 @@ interface NavbarProps {
   isMobileFrame: boolean;
   onToggleMobileFrame: () => void;
   pendingRequestsCount: number;
+  isXamppConnected?: boolean;
+  onOpenXamppModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -20,12 +22,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   isMobileFrame,
   onToggleMobileFrame,
   pendingRequestsCount,
+  isXamppConnected = false,
+  onOpenXamppModal,
 }) => {
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         
-        {/* Zone 1: Single text element wordmark */}
+        {/* Zone 1: Single text element wordmark & XAMPP connection pill */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => onSelectTab('explorar')}
@@ -39,6 +43,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 Échele Camello
               </span>
             </div>
+          </button>
+
+          {/* Botón de Estado XAMPP */}
+          <button
+            onClick={onOpenXamppModal}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all shadow-2xs ${
+              isXamppConnected
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300'
+                : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100 hover:border-rose-300'
+            }`}
+            title="Haz clic para ver detalles y gestionar la conexión con XAMPP / MySQL"
+          >
+            <span className={`w-2 h-2 rounded-full shrink-0 ${isXamppConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+            <Database className="w-3 h-3 opacity-70 shrink-0" />
+            <span className="hidden sm:inline">XAMPP</span>
+            <span className="text-[10px] font-bold">{isXamppConnected ? 'MySQL' : 'Offline'}</span>
           </button>
         </div>
 

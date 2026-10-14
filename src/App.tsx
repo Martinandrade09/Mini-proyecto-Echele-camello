@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   UserRole,
   Worker,
@@ -15,6 +15,8 @@ import {
   INITIAL_CHAT_MESSAGES,
   INITIAL_REPORTS,
 } from './data/mockData';
+import { xamppApi, HealthCheckResult } from './services/xamppApi';
+import { XamppStatusModal } from './components/XamppStatusModal';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { CategoryBar } from './components/CategoryBar';
@@ -38,8 +40,11 @@ import {
   ArrowUpDown,
   Smartphone,
   Info,
-  X
+  X,
+  Lightbulb,
+  Tag
 } from 'lucide-react';
+import { matchesSemanticSearch, getSemanticRelatedCategories } from './utils/searchKeywords';
 
 export default function App() {
   // State
@@ -66,6 +71,12 @@ export default function App() {
   const [activeRatingRequest, setActiveRatingRequest] = useState<ServiceRequest | null>(null);
   const [activeReportRequest, setActiveReportRequest] = useState<ServiceRequest | null>(null);
 
+  // XAMPP Connection & Synchronization State
+  const [isXamppConnected, setIsXamppConnected] = useState<boolean>(false);
+  const [healthData, setHealthData] = useState<HealthCheckResult>({ isConnected: false });
+  const [isXamppModalOpen, setIsXamppModalOpen] = useState<boolean>(false);
+  const [isSyncingXampp, setIsSyncingXampp] = useState<boolean>(false);
+
   // Notification Banner
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
 
@@ -76,7 +87,52 @@ export default function App() {
     }, 5000);
   };
 
-  // Filtered Workers
+  // Sincronización con XAMPP Apache + MySQL
+  const checkAndSyncXampp = async (showNotifications = false) => {
+    setIsSyncingXampp(true);
+    try {
+      const health = await xamppApi.checkHealth();
+      setHealthData(health);
+      setIsXamppConnected(health.isConnected);
+
+      if (health.isConnected) {
+        const remoteData = await xamppApi.fetchAllData();
+        if (remoteData) {
+          if (remoteData.workers && remoteData.workers.length > 0) {
+            setWorkers(remoteData.workers);
+          }
+          if (remoteData.requests) {
+            setRequests(remoteData.requests);
+          }
+          if (remoteData.chatMessages) {
+            setChatMessages(remoteData.chatMessages);
+          }
+          if (remoteData.reports) {
+            setReports(remoteData.reports);
+          }
+          if (showNotifications) {
+            showBanner('✅ Sincronizado en tiempo real con MySQL de XAMPP (echele_camello).');
+          }
+        }
+      } else if (showNotifications) {
+        showBanner('⚠️ No se detectó XAMPP. Usando modo de datos local.');
+      }
+    } catch (err) {
+      console.warn('[XAMPP] Error de sincronización:', err);
+    } finally {
+      setIsSyncingXampp(false);
+    }
+  };
+
+  // Cargar datos de MySQL al iniciar
+  useEffect(() => {
+    checkAndSyncXampp(false);
+  }, []);
+
+  // Semantic search hints – categories related to the query
+  const semanticHints = searchQuery.trim() ? getSemanticRelatedCategories(searchQuery) : [];
+
+  // Filtered Workers (with semantic keyword matching)
   const filteredWorkers = workers.filter((w) => {
     // Category match
     if (selectedCategoryId && w.categoryId !== selectedCategoryId) {
@@ -86,16 +142,15 @@ export default function App() {
     if (selectedNeighborhood !== 'TODOS' && !w.neighborhood.toLowerCase().includes(selectedNeighborhood.toLowerCase())) {
       return false;
     }
-    // Search query match
+    // Semantic search match (includes keyword-to-category dictionary)
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchName = w.name.toLowerCase().includes(q);
-      const matchTrade = w.trade.toLowerCase().includes(q);
-      const matchSpecialties = w.specialties.some((s) => s.toLowerCase().includes(q));
-      const matchBio = w.bio.toLowerCase().includes(q);
-      if (!matchName && !matchTrade && !matchSpecialties && !matchBio) {
-        return false;
-      }
+      const matched = matchesSemanticSearch(
+        searchQuery,
+        [w.name, w.trade, w.bio, ...w.specialties, w.neighborhood],
+        w.categoryId,
+        undefined  // Worker type doesn't have categoryName; categoryId is sufficient
+      );
+      if (!matched) return false;
     }
     return true;
   }).sort((a, b) => {
@@ -106,7 +161,7 @@ export default function App() {
   });
 
   // Handlers for Request Lifecycle
-  const handleCreateRequest = (newReqData: Omit<ServiceRequest, 'id' | 'createdAt'>) => {
+  const handleCreateRequest = async (newReqData: Omit<ServiceRequest, 'id' | 'createdAt'>) => {
     const newRequest: ServiceRequest = {
       ...newReqData,
       id: `req-${Date.now().toString().slice(-4)}`,
@@ -134,11 +189,16 @@ export default function App() {
     };
     setChatMessages((prev) => [...prev, initialMsg]);
 
+    // Guardar en MySQL en XAMPP si está conectado
+    if (isXamppConnected) {
+      await xamppApi.createRequest(newRequest);
+    }
+
     showBanner(`¡Solicitud enviada a ${newRequest.workerName}! Notificamos al trabajador para su confirmación.`);
     setActiveTab('solicitudes');
   };
 
-  const handleUpdateStatus = (requestId: string, newStatus: RequestStatus, reason?: string) => {
+  const handleUpdateStatus = async (requestId: string, newStatus: RequestStatus, reason?: string) => {
     setRequests((prev) =>
       prev.map((r) => {
         if (r.id === requestId) {
@@ -153,6 +213,11 @@ export default function App() {
       })
     );
 
+    // Actualizar en MySQL de XAMPP
+    if (isXamppConnected) {
+      await xamppApi.updateRequestStatus(requestId, newStatus, reason);
+    }
+
     if (newStatus === 'ACEPTADA') {
       showBanner('¡Solicitud aceptada! Ahora puedes coordinar los detalles en el chat.');
     } else if (newStatus === 'COMPLETADA') {
@@ -165,7 +230,7 @@ export default function App() {
   };
 
   // Handlers for Chat
-  const handleSendMessage = (requestId: string, text: string) => {
+  const handleSendMessage = async (requestId: string, text: string) => {
     const senderName = currentRole === 'trabajador' ? 'Jhon Jairo Ramírez' : 'Carlos Mendoza';
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -177,10 +242,15 @@ export default function App() {
       read: true,
     };
     setChatMessages((prev) => [...prev, newMsg]);
+
+    // Persistir en MySQL
+    if (isXamppConnected) {
+      await xamppApi.sendMessage(newMsg);
+    }
   };
 
   // Handlers for Rating & Reviews
-  const handleSubmitRating = (requestId: string, ratingValue: number, comment: string) => {
+  const handleSubmitRating = async (requestId: string, ratingValue: number, comment: string) => {
     const req = requests.find((r) => r.id === requestId);
     if (!req) return;
 
@@ -224,12 +294,17 @@ export default function App() {
       })
     );
 
+    // Persistir en MySQL de XAMPP
+    if (isXamppConnected) {
+      await xamppApi.submitReview(requestId, ratingValue, comment);
+    }
+
     setActiveRatingRequest(null);
     showBanner(`¡Gracias! Has calificado a ${req.workerName} con ${ratingValue} estrellas.`);
   };
 
   // Handlers for Report Submission
-  const handleSubmitReport = (reportData: Omit<ReportItem, 'id' | 'createdAt' | 'status'>) => {
+  const handleSubmitReport = async (reportData: Omit<ReportItem, 'id' | 'createdAt' | 'status'>) => {
     const newReport: ReportItem = {
       ...reportData,
       id: `rep-${Date.now().toString().slice(-4)}`,
@@ -238,18 +313,30 @@ export default function App() {
     };
     setReports([newReport, ...reports]);
     setActiveReportRequest(null);
+
+    // Persistir reporte en MySQL
+    if (isXamppConnected) {
+      await xamppApi.createReport(newReport);
+    }
+
     showBanner('Reporte enviado al equipo de administración para su investigación.');
   };
 
   // Handlers for Worker Self Management
-  const handleUpdateCurrentWorker = (updatedFields: Partial<Worker>) => {
+  const handleUpdateCurrentWorker = async (updatedFields: Partial<Worker>) => {
     setWorkers((prev) =>
       prev.map((w) => (w.id === 'w-1' ? { ...w, ...updatedFields } : w))
     );
+
+    // Persistir cambios en MySQL
+    if (isXamppConnected) {
+      await xamppApi.updateWorker('w-1', updatedFields);
+    }
+
     showBanner('Perfil de trabajador actualizado.');
   };
 
-  const handleUploadWorkerDocument = (docData: Omit<WorkerDocument, 'id' | 'uploadDate' | 'status'>) => {
+  const handleUploadWorkerDocument = async (docData: Omit<WorkerDocument, 'id' | 'uploadDate' | 'status'>) => {
     const newDoc: WorkerDocument = {
       ...docData,
       id: `doc-${Date.now()}`,
@@ -269,10 +356,15 @@ export default function App() {
         return w;
       })
     );
+
+    // Persistir documento en MySQL
+    if (isXamppConnected) {
+      await xamppApi.uploadDocument('w-1', newDoc);
+    }
   };
 
   // Handlers for Admin
-  const handleApproveDocument = (workerId: string, documentId: string) => {
+  const handleApproveDocument = async (workerId: string, documentId: string) => {
     setWorkers((prev) =>
       prev.map((w) => {
         if (w.id === workerId) {
@@ -291,10 +383,16 @@ export default function App() {
         return w;
       })
     );
+
+    // Persistir aprobación en MySQL
+    if (isXamppConnected) {
+      await xamppApi.updateDocumentStatus(workerId, documentId, 'VERIFICADO');
+    }
+
     showBanner('Documento aprobado. El camellador cuenta ahora con verificación oficial.');
   };
 
-  const handleRejectDocument = (workerId: string, documentId: string, reason: string) => {
+  const handleRejectDocument = async (workerId: string, documentId: string, reason: string) => {
     setWorkers((prev) =>
       prev.map((w) => {
         if (w.id === workerId) {
@@ -311,6 +409,12 @@ export default function App() {
         return w;
       })
     );
+
+    // Persistir rechazo en MySQL
+    if (isXamppConnected) {
+      await xamppApi.updateDocumentStatus(workerId, documentId, 'RECHAZADO', reason);
+    }
+
     showBanner(`Documento rechazado con motivo: "${reason}".`);
   };
 
@@ -438,39 +542,74 @@ export default function App() {
             </p>
 
             {/* Quick Search Box in Hero */}
-            <div className="bg-white/95 backdrop-blur-md p-2 rounded-2xl shadow-xl border border-white/20 flex flex-col sm:flex-row items-center gap-2 max-w-xl">
-              <div className="flex-1 flex items-center gap-2 px-3 w-full">
-                <Search className="w-4 h-4 text-slate-400 shrink-0" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="¿Qué necesitas arreglar? (ej. fuga de agua, pintar cuarto...)"
-                  className="w-full h-10 text-xs text-[#0F172A] outline-hidden placeholder:text-slate-400 bg-transparent"
-                />
+            <div className="space-y-2 max-w-xl">
+              <div className="bg-white/95 backdrop-blur-md p-2 rounded-2xl shadow-xl border border-white/20 flex flex-col sm:flex-row items-center gap-2">
+                <div className="flex-1 flex items-center gap-2 px-3 w-full">
+                  <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="¿Qué necesitas arreglar? (ej. madera, fuga de agua, pintar...)"
+                    className="w-full h-10 text-xs text-[#0F172A] outline-hidden placeholder:text-slate-400 bg-transparent"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors shrink-0"
+                      title="Limpiar búsqueda"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <select
+                    value={selectedNeighborhood}
+                    onChange={(e) => setSelectedNeighborhood(e.target.value)}
+                    className="h-10 px-3 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 outline-hidden font-medium"
+                  >
+                    <option value="TODOS">Toda Bogotá</option>
+                    <option value="Chapinero">Chapinero</option>
+                    <option value="Teusaquillo">Teusaquillo</option>
+                    <option value="Usaquén">Usaquén</option>
+                    <option value="Chicó">Chicó</option>
+                    <option value="Cedritos">Cedritos</option>
+                  </select>
+
+                  <button
+                    onClick={() => {}}
+                    className="w-full sm:w-auto px-5 h-10 rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] font-bold text-xs shadow-xs transition-colors shrink-0 flex items-center justify-center"
+                  >
+                    Buscar
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <select
-                  value={selectedNeighborhood}
-                  onChange={(e) => setSelectedNeighborhood(e.target.value)}
-                  className="h-10 px-3 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 outline-hidden font-medium"
-                >
-                  <option value="TODOS">Toda Bogotá</option>
-                  <option value="Chapinero">Chapinero</option>
-                  <option value="Teusaquillo">Teusaquillo</option>
-                  <option value="Usaquén">Usaquén</option>
-                  <option value="Chicó">Chicó</option>
-                  <option value="Cedritos">Cedritos</option>
-                </select>
-
-                <button
-                  onClick={() => {}}
-                  className="w-full sm:w-auto px-5 h-10 rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] font-bold text-xs shadow-xs transition-colors shrink-0 flex items-center justify-center"
-                >
-                  Buscar
-                </button>
-              </div>
+              {/* Semantic Search Hint chips */}
+              {semanticHints.length > 0 && (
+                <div className="flex items-start gap-2 flex-wrap animate-fade-in">
+                  <div className="flex items-center gap-1 text-[11px] text-amber-300 font-semibold shrink-0 mt-0.5">
+                    <Lightbulb className="w-3 h-3" />
+                    <span>Mostrando:</span>
+                  </div>
+                  {semanticHints.map((hint) => (
+                    <button
+                      key={hint.categoryId}
+                      onClick={() => {
+                        setSelectedCategoryId(hint.categoryId);
+                        setSearchQuery('');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm border border-white/30 text-[11px] text-white font-semibold transition-all"
+                      title={`Ver todos los ${hint.categoryName}`}
+                    >
+                      <Tag className="w-2.5 h-2.5" />
+                      {hint.categoryName}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -628,6 +767,8 @@ export default function App() {
         isMobileFrame={isMobileFrame}
         onToggleMobileFrame={() => setIsMobileFrame(!isMobileFrame)}
         pendingRequestsCount={pendingRequestsCount}
+        isXamppConnected={isXamppConnected}
+        onOpenXamppModal={() => setIsXamppModalOpen(true)}
       />
 
       {/* Main Layout Body: Device Emulator vs Responsive Web Canvas */}
@@ -653,9 +794,23 @@ export default function App() {
                 </div>
                 <span className="font-heading font-extrabold text-sm text-[#0F172A]">Échele Camello</span>
               </div>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                {currentRole}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setIsXamppModalOpen(true)}
+                  className={`text-[9px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 border ${
+                    isXamppConnected
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}
+                  title="Estado XAMPP"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${isXamppConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                  XAMPP
+                </button>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                  {currentRole}
+                </span>
+              </div>
             </div>
 
             {/* Scrollable Screen Content */}
@@ -728,6 +883,14 @@ export default function App() {
         currentRole={currentRole}
         onClose={() => setActiveReportRequest(null)}
         onSubmitReport={handleSubmitReport}
+      />
+
+      <XamppStatusModal
+        isOpen={isXamppModalOpen}
+        onClose={() => setIsXamppModalOpen(false)}
+        health={healthData}
+        onRefresh={() => checkAndSyncXampp(true)}
+        isSyncing={isSyncingXampp}
       />
 
       {/* Footer */}

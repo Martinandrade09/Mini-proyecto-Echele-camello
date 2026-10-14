@@ -325,6 +325,56 @@ export const INITIAL_WORKERS: Worker[] = [
         serviceName: 'Apertura de cerradura de seguridad'
       }
     ]
+  },
+  {
+    id: 'w-6',
+    name: 'Héctor Fabio Morales',
+    trade: 'Maestro Carpintero y Ebanista',
+    categoryId: 'carpinteria',
+    avatar: '/src/assets/images/worker_painter_avatar_1791407989291.jpg',
+    rating: 4.95,
+    reviewsCount: 58,
+    completedJobsCount: 94,
+    distanceKm: 2.3,
+    neighborhood: 'Chapinero, Bogotá',
+    hourlyRate: 48000,
+    baseServiceRate: 50000,
+    bio: 'Especialista en madera maciza, melamina, armado de closets, reparación de puertas, muebles modulares y lacados finos. Más de 18 años de experiencia en carpintería y ebanistería.',
+    experienceYears: 18,
+    phone: '+57 314 670 1928',
+    isVerified: true,
+    documentStatus: 'VERIFICADO',
+    isAvailableToday: true,
+    specialties: ['Muebles de madera a medida', 'Ajuste de puertas y cajones', 'Armado de closets y repisas', 'Lacados y barnizados'],
+    unavailableSlots: [],
+    documents: [
+      {
+        id: 'doc-6-1',
+        type: 'cedula',
+        title: 'Cédula de Ciudadanía',
+        fileName: 'CC_79240118_HectorMorales.pdf',
+        uploadDate: '2026-05-12',
+        status: 'VERIFICADO'
+      },
+      {
+        id: 'doc-6-2',
+        type: 'certificacion_tecnica',
+        title: 'Certificado Técnico SENA - Ebanistería y Madera',
+        fileName: 'SENA_Ebanisteria_Hector.pdf',
+        uploadDate: '2026-05-12',
+        status: 'VERIFICADO'
+      }
+    ],
+    reviews: [
+      {
+        id: 'rev-6-1',
+        clientName: 'Paola Andrea Castillo',
+        rating: 5,
+        comment: 'Excelente carpintero. Arregló las puertas de los closets de madera que no cerraban y quedaron como nuevas.',
+        date: '2026-09-29',
+        serviceName: 'Ajuste de puertas de madera en closet'
+      }
+    ]
   }
 ];
 
